@@ -1,0 +1,27 @@
+#!/usr/bin/env python3
+
+""" Ia cursul BNR.
+
+Usage:
+    bnrpls | xclip
+"""
+
+import sys
+from urllib.request import urlopen
+import re
+
+def curs(moneda):
+    with urlopen('https://bnr.ro/Home.aspx') as f:
+        html = f.read().decode('latin1')
+        match = re.search(rf'1 {moneda}</th><td><span>([\d.]+)</span>', html)
+        return match.group(1)
+
+def main():
+    rata = curs('EUR')
+
+    if sys.stdout.isatty():
+        print(rata)
+    else:
+        sys.stdout.write(rata)
+
+main()
