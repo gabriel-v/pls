@@ -1,0 +1,122 @@
+#!/bin/bash -e
+
+## Basic usage
+# qemupls vm.qcow2 --cpus 2 --memory 4096 --hostfwd tcp:127.0.0.1:3389-:3389 --sdl
+
+## Derived images
+# qemu-img create -f qcow2 -b $base_image $derived_image
+
+## Compress an image for later use
+# qemu-img convert -f qcow2 -O qcow2 -c -p $source_image $target_image
+
+## Windows 8
+# curl -OL https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso
+# qemu-img create -f qcow2 win8.qcow2 16G
+# qemupls win8.qcow2 --memory 4096 --cdrom windows8.iso --cdrom virtio-win.iso --sdl
+
+qemu=qemu-system-x86_64
+verbose=
+echo=
+image="$1"; shift
+cpus=1
+memory=512
+vnc=
+sdl=
+tablet=
+cdroms=()
+usbdisks=()
+hostfwds=()
+restrict=
+
+while [[ ! -z "$@" ]]; do
+  arg="$1"
+  shift
+  case "$arg" in
+    "--verbose") verbose=1 ;;
+    "--echo") echo=1 ;;
+    "--qemu") qemu="$1"; shift ;;
+    "--cpus") cpus="$1"; shift ;;
+    "--memory") memory="$1"; shift ;;
+    "--vnc") vnc="$1"; shift ;;
+    "--sdl") sdl=1 ;;
+    "--tablet") tablet=1 ;;
+    "--cdrom") cdroms+=("$1"); shift ;;
+    "--usbdisk") usbdisks+=("$1"); shift ;;
+    "--hostfwd") hostfwds+=("$1"); shift ;;
+    "--restrict") restrict=1 ;;
+    *) echo "Unknown option $arg" >&2; exit 1
+  esac
+done
+
+if [ ! -z $verbose ]; then
+  echo cpus="$cpus"
+  echo memory="$memory"
+  echo image="$image"
+  echo vnc="$vnc"
+  echo sdl=$sdl
+  echo tablet=$tablet
+  echo cdroms="${cdroms[@]}"
+  echo usbdisks="${usbdisks[@]}"
+  echo hostfwds="${hostfwds[@]}"
+  echo restrict=$restrict
+fi
+
+
+netdev="user,id=user"
+
+for hostfwd in "${hostfwds[@]}"; do
+  netdev="$netdev,hostfwd=$hostfwd"
+done
+
+if [ ! -z $restrict ]; then
+  netdev="$netdev,restrict=on"
+fi
+
+qemu_args=(
+  -cpu host -enable-kvm -smp cpus=$cpus
+  -m $memory
+  -display none
+  # -chardev socket,id=mon-qmp,path=vm.qmp,server,nowait
+  # -mon chardev=mon-qmp,mode=control -serial mon:unix:path=vm.mon,server,nowait
+  -netdev "$netdev" -device virtio-net-pci,netdev=user,romfile=
+  -drive if=virtio,discard=unmap,detect-zeroes=unmap,file="$image"
+)
+
+for cdrom in "${cdroms[@]}"; do
+  qemu_args+=(
+    -drive file="$cdrom",media=cdrom
+  )
+done
+
+if [ ! -z "$usbdisks" ]; then
+  qemu_args+=(
+    -device piix3-usb-uhci
+  )
+fi
+
+for usbdisk_id in "${!usbdisks[@]}"; do
+  usbdisk="${usbdisks[$usbdisk_id]}"
+  qemu_args+=(
+    -device usb-storage,drive=usb$i
+    -drive if=none,id=usb$1,format=raw,file="$usbdisk"
+  )
+done
+
+if [ ! -z $vnc ]; then
+  qemu_args+=(-display vnc=localhost:$vnc)
+fi
+
+if [ ! -z $sdl ]; then
+  qemu_args+=(-display sdl)
+fi
+
+if [ ! -z $tablet ]; then
+  qemu_args+=(-usbdevice tablet)
+fi
+
+if [ ! $echo ]; then (
+  set -x
+  exec $qemu ${qemu_args[@]}
+) else (
+  echo $qemu ${qemu_args[@]}
+) fi
